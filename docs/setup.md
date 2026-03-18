@@ -612,6 +612,15 @@ After modifying workflows in n8n:
 3. `git add -A && git commit` — sanitization runs automatically
 4. Verify with `git diff workflows/` before pushing
 
+### Version & Date Management
+- Version is stored in the `VERSION` file at the root of the project
+- To bump the version, edit `VERSION` before committing:
+```
+  nano ~/content-digest-automation/VERSION
+```
+- `**Last Updated**` and `**Version**` in all staged `.md` files are updated
+  automatically by the pre-commit hook — no manual editing needed
+
 ### Security Notes
 - `.env` is gitignored — never committed
 - `secrets.conf` is gitignored — never committed

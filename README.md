@@ -145,6 +145,8 @@ values from workflow JSON files before every commit.
 - `scripts/sanitize.sh` replaces real values with placeholders in all workflow JSONs
 - `.git/hooks/pre-commit` runs `sanitize.sh` automatically before every commit
 - Sanitized files are re-staged automatically
+- `VERSION` file contains the current version number (single source of truth)
+- Date and version in docs are updated automatically on commit (staged docs only)
 
 ### Adding New Secrets
 When you add a new sensitive value to a workflow (e.g. a new Cronitor URL):
@@ -699,6 +701,6 @@ Private project - Internal use only
 
 ---
 
-**Last Updated**: March 18, 2026  
-**Version**: 1.2.0 (Production - Graceful 0-Item Handling + Duplicate Prevention + Timezone Alignment + Git & Security)
+**Last Updated**: March 18, 2026
+**Version**: 1.2.0
 **System Status**: Fully operational with comprehensive monitoring
