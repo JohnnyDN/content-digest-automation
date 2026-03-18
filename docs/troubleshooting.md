@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Common issues and solutions for the AI Content Digest automation system.
+Common issues and solutions for the Content Digest automation system.
 
 ## Table of Contents
 
@@ -13,6 +13,7 @@ Common issues and solutions for the AI Content Digest automation system.
 7. [System State Issues](#system-state-issues)
 8. [Monitoring Issues](#monitoring-issues)
 9. [n8n Specific Issues](#n8n-specific-issues)
+10. [Git & Pre-commit Hook Issues](#git--pre-commit-hook-issues)
 
 ---
 
@@ -1786,7 +1787,43 @@ HAVING COUNT(*) > 1;
 7. ✅ Commit to version control
 8. ✅ Document what you changed
 
+## Git & Pre-commit Hook Issues
+
+### Pre-commit hook not running
+**Symptom:** Committing without sanitization running.
+**Cause:** Hook not installed or not executable.
+**Fix:**
+```bash
+bash scripts/install-hooks.sh
+chmod +x .git/hooks/pre-commit
+```
+
+### secrets.conf not found
+**Symptom:** `❌ secrets.conf not found` error on commit.
+**Fix:**
+```bash
+cp scripts/secrets.conf.example scripts/secrets.conf
+nano scripts/secrets.conf  # Fill in real values
+```
+
+### Sensitive value not being replaced
+**Symptom:** Real URL or email still visible after sanitization.
+**Cause:** Value not in `secrets.conf`.
+**Fix:** Add a new line to `secrets.conf`:
+```
+NEW_PLACEHOLDER|real_sensitive_value
+```
+Also add the placeholder (without real value) to `secrets.conf.example`.
+
+### Push rejected (fetch first)
+**Symptom:** `! [rejected] main -> main (fetch first)`
+**Cause:** Remote has commits not in local (e.g. GitHub auto-generated README).
+**Fix:** Force push only on first push when you are the sole contributor:
+```bash
+git push -u origin main --force
+```
+
 ---
 
-**Last Updated**: March 4, 2026  
-**Version**: 1.2.0 (n8n Caching, Timezone, Loop Counting, Duplicate Prevention)
+**Last Updated**: March 18, 2026  
+**Version**: 1.2.0 (n8n Caching, Timezone, Loop Counting, Duplicate Prevention, Git & Security)

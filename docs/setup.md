@@ -1,6 +1,6 @@
 # Setup Guide
-
-Complete guide for deploying the AI Content Digest automation system from scratch.
+*Last updated: March 18, 2026*
+Complete guide for deploying the Content Digest automation system from scratch.
 
 ## Prerequisites
 
@@ -577,3 +577,44 @@ System is now production-ready with:
 - Full error tracking
 
 **Next scheduled run:** Check Cronitor dashboard or calculate next day matching pattern (1, 4, 7, 10, etc.)
+
+## Git Repository Setup
+
+### Initial Setup
+The repository is hosted at:
+`https://github.com/JohnnyDN/content-digest-automation`
+
+Clone and set up:
+```bash
+git clone https://github.com/JohnnyDN/content-digest-automation.git
+cd content-digest-automation
+
+# Install pre-commit hook
+bash scripts/install-hooks.sh
+
+# Create secrets file
+cp scripts/secrets.conf.example scripts/secrets.conf
+nano scripts/secrets.conf  # Fill in real values
+```
+
+### secrets.conf Format
+```
+# Format: PLACEHOLDER|REAL_VALUE
+CRONITOR_CYCLE_MANAGER_URL|https://cronitor.link/p/YOUR_KEY/YOUR_MONITOR?state=complete
+CRONITOR_DISTRIBUTION_URL|https://cronitor.link/p/YOUR_KEY/YOUR_MONITOR?state=complete
+YOUR_EMAIL|your@email.com
+```
+
+### Committing Workflow Changes
+After modifying workflows in n8n:
+1. Re-export the workflow JSON from n8n
+2. Save to `workflows/` folder
+3. `git add -A && git commit` — sanitization runs automatically
+4. Verify with `git diff workflows/` before pushing
+
+### Security Notes
+- `.env` is gitignored — never committed
+- `secrets.conf` is gitignored — never committed
+- `backups/` is gitignored — never committed
+- Workflow JSONs are sanitized automatically on commit
+- n8n credential IDs in workflows are safe — useless without access to the instance

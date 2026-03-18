@@ -1,4 +1,4 @@
-# AI Content Digest Automation System
+# Content Digest Automation System
 
 Fully automated 3-day content digest system that cycles through AI, Finance, Music, and Science topics, running on production VPS infrastructure.
 
@@ -94,13 +94,13 @@ content-digest-automation/
 │   ├── .env
 │   └── .env.example
 ├── workflows/              # n8n workflow exports (JSON)
-│   ├── 00-cycle-manager.json
-│   ├── 01-feed-collection.json
-│   ├── 02-enrichment.json
-│   ├── 03-digest-generation.json
-│   ├── 04-distribution.json
-│   ├── 05-error-logger.json
-│   └── 06-purger.json
+│   ├── 00 - Cycle Manager.json
+│   ├── 01 - Feed Collection.json
+│   ├── 02 – Enrichments.json
+│   ├── 03 – Digest Generation.json
+│   ├── 04 – Distribution.json
+│   ├── 05 - Error Logger.json
+│   └── 06 - Purger.json
 ├── sql/                    # Database schemas & queries
 │   ├── 01_schema.sql
 │   ├── 02_initial_data.sql
@@ -108,13 +108,54 @@ content-digest-automation/
 │   ├── error_check.sql
 │   └── cycle_status.sql
 ├── scripts/                # Utility scripts
-│   └── backup.sh
+│   ├── backup.sh
+│   ├── sanitize.sh          # Replaces secrets with placeholders
+│   ├── install-hooks.sh     # Installs git pre-commit hook
+│   └── secrets.conf.example # Template for secrets.conf (never commit secrets.conf)
 ├── backups/                # Database backups (daily automated)
 ├── docs/                   # Documentation
 │   ├── workflows.md
 │   ├── setup.md
 │   └── troubleshooting.md
 └── README.md
+```
+
+## 🔒 Git & Security
+
+### Repository Setup
+This project uses a pre-commit hook to automatically sanitize sensitive
+values from workflow JSON files before every commit.
+
+### First-Time Setup (after cloning)
+1. Install the pre-commit hook:
+```bash
+   bash scripts/install-hooks.sh
+```
+
+2. Create your local secrets file from the template:
+```bash
+   cp scripts/secrets.conf.example scripts/secrets.conf
+   nano scripts/secrets.conf  # Fill in your real values
+```
+
+3. `secrets.conf` is gitignored — never commit it.
+
+### How It Works
+- `scripts/secrets.conf` maps placeholders → real values (local only)
+- `scripts/sanitize.sh` replaces real values with placeholders in all workflow JSONs
+- `.git/hooks/pre-commit` runs `sanitize.sh` automatically before every commit
+- Sanitized files are re-staged automatically
+
+### Adding New Secrets
+When you add a new sensitive value to a workflow (e.g. a new Cronitor URL):
+1. Add a new line to `secrets.conf`: `PLACEHOLDER_NAME|real_value`
+2. Add the same placeholder to `secrets.conf.example` (without the real value)
+3. The next commit will sanitize it automatically
+
+### Manual Sanitization
+To sanitize without committing:
+```bash
+bash scripts/sanitize.sh
 ```
 
 ## 🔧 Common Tasks
@@ -291,6 +332,8 @@ https://cockpit.walterlabs.net
 - ✅ All credentials stored in .env (not committed to git)
 - ✅ External monitoring via Cronitor
 - ✅ Server timezone properly configured (Europe/Rome)
+- ✅ Workflow JSONs sanitized automatically via pre-commit hook
+- ✅ secrets.conf gitignored — real values never committed
 
 ## 📦 Data Retention
 
@@ -656,6 +699,6 @@ Private project - Internal use only
 
 ---
 
-**Last Updated**: March 4, 2026  
-**Version**: 1.2.0 (Production - Graceful 0-Item Handling + Duplicate Prevention + Timezone Alignment)
+**Last Updated**: March 18, 2026  
+**Version**: 1.2.0 (Production - Graceful 0-Item Handling + Duplicate Prevention + Timezone Alignment + Git & Security)
 **System Status**: Fully operational with comprehensive monitoring

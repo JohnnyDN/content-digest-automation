@@ -1,6 +1,6 @@
 # Workflow Documentation
 
-Detailed documentation for all 7 workflows in the AI Content Digest automation system.
+Detailed documentation for all 7 workflows in the Content Digest automation system.
 
 ## System Architecture
 ```
@@ -60,6 +60,22 @@ const cycleDay = Math.floor(Date.now() / (3 * 24 * 60 * 60 * 1000)) % 4;
 - Runs on: 1st, 4th, 7th, 10th, 13th, 16th, 19th, 22nd, 25th, 28th, 31st of each month
 - Time: 02:00 Europe/Rome
 - Server timezone: Europe/Rome (critical for correct timing)
+
+## Workflow Export & Git Sync
+
+After modifying any workflow in n8n:
+1. Open the workflow in n8n
+2. Export as JSON: **⋮ menu → Download**
+3. Save to `~/content-digest-automation/workflows/`
+4. Commit:
+```bash
+git add -A
+git commit -m "Update WF XX: description of change"
+```
+   The pre-commit hook will automatically sanitize sensitive values.
+
+**Important:** Always re-export immediately after changes — don't let
+workflow files drift out of sync with what's running in n8n.
 
 ## Workflow 0: Cycle Manager
 
@@ -1373,5 +1389,5 @@ If `age` is more than 4 days, Workflow 0 might not be running!
 
 See [troubleshooting.md](troubleshooting.md) for common workflow issues.
 
-**Last Updated**: March 4, 2026  
+**Last Updated**: March 18, 2026  
 **Version**: 1.2.0 (Production - Graceful 0-Item Handling + Duplicate Prevention)
