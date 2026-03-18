@@ -1,0 +1,451 @@
+{
+  "name": "03 – Digest Generation",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "id": "75722260-edee-4e52-97d9-1c7ad5aa566f",
+      "name": "When clicking ‘Execute workflow’",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  e.id           AS enriched_id,\n  i.id           AS item_id,\n  i.source_id,\n  s.topic        AS topic,\n  i.title,\n  i.url,\n  i.published_at,\n  e.language,\n  e.category,\n  e.tags,\n  e.short_summary,\n  e.detailed_summary,\n  e.importance_score,\n  e.virality_score\nFROM item_enriched e\nJOIN items i ON i.id = e.item_id\nJOIN sources s ON s.id = i.source_id\nWHERE i.published_at::date >= $1\n  AND i.published_at::date <= $2  -- ← Cast to date for comparison\nORDER BY\n  e.importance_score DESC NULLS LAST,\n  e.virality_score DESC NULLS LAST,\n  i.published_at DESC;",
+        "options": {
+          "queryReplacement": "={{ [$('Read System State').first().json.period_start, $('Read System State').first().json.period_end] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        -96
+      ],
+      "id": "c783b969-5ab5-4485-be29-b3ea06b2dc72",
+      "name": "Select Items to draft",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// All rows from the Postgres node\nconst rows = $items().map(item => item.json);\n\n// Get period from Period Start node (real dates)\nconst periodStart = $('Read System State').first().json.period_start;\nconst periodEnd = $('Read System State').first().json.period_end;\n\n// Get topic from first item (all items should have the same topic)\nconst topic = rows.length > 0 ? rows[0].topic : 'General';\n\n// Build the payload for Gemini\nconst payload = {\n  topic: topic,  // ← Add topic at top level\n  audience_profile: 'HR and business managers, non-technical, Italy-based but English-speaking',\n  period: {\n    start: periodStart,\n    end: periodEnd,\n  },\n  items: rows.map(r => ({\n    enriched_id: r.enriched_id,\n    item_id: r.item_id,\n    source_id: r.source_id,\n    topic: r.topic,  // ← Include topic in each item too\n    title: r.title,\n    url: r.url,\n    published_at: r.published_at,\n    language: r.language,\n    category: r.category,\n    tags: r.tags,\n    short_summary: r.short_summary,\n    detailed_summary: r.detailed_summary,\n    importance_score: r.importance_score,\n    virality_score: r.virality_score,\n  })),\n};\n\n// Return a single item with this JSON\nreturn [{ json: payload }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -176
+      ],
+      "id": "72ee95b5-5722-4bb0-8264-79a4500813b4",
+      "name": "Parse Results"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO digests (\n  run_date,\n  period_start,\n  period_end,\n  full_markdown,\n  linkedin_post_text,\n  video_url,\n  dominant_topic,\n  topic_category\n)\nVALUES (\n  now(),\n  $1,\n  $2,\n  $3,\n  $4,\n  NULL,\n  $5,\n  $6\n)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Read System State').first().json.period_start,\n  $('Read System State').first().json.period_end,\n  $('Parse Output').first().json.fullmarkdown,\n  $('Parse Output').first().json.linkedinposttext,\n  $('Parse Output').first().json.dominant_topic,\n  $('Parse Results').first().json.topic\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1920,
+        -176
+      ],
+      "id": "56a8920b-fb95-4f5f-969c-99eabf3f3ec8",
+      "name": "Insert Into digests Table",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-5-20250929",
+          "mode": "list",
+          "cachedResultName": "claude-sonnet-4-5-20250929"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are analyzing {{ $json.items.length }} high-priority {{ $json.topic }} items from {{ $json.period.start }} to {{ $json.period.end }}.\n\nDATA PROVIDED:\n{{ JSON.stringify($json, null, 2) }}\n\nTASK: Generate a professional 3-Day Digest for {{ $json.topic }} audiences.\n\nSTEP 1: IDENTIFY THE DOMINANT THEME\nAnalyze all items and identify:\n1. dominant_topic: Single concise phrase (3-5 words) that captures the main theme across these {{ $json.topic }} stories.\n   Examples based on topic:\n   - AI: \"AI Workforce Strategy\", \"Enterprise AI Adoption\", \"LLM Safety Concerns\"\n   - Finance: \"Fed Rate Decision Impact\", \"Fintech Disruption Wave\", \"Crypto Market Volatility\"\n   - Music: \"Streaming Revenue Shifts\", \"AI Music Generation Debate\", \"Live Event Renaissance\"\n   - Science: \"Climate Research Breakthroughs\", \"Medical AI Applications\", \"Space Exploration Milestones\"\n\nSTEP 2: CRAFT AUDIENCE-FOCUSED CONTENT\n2. theme_sentence: Write ONE compelling hook sentence (15-25 words) that tells {{ $json.topic }} professionals why this matters to them. Focus on implications, not just news.\n\n3. fullmarkdown: Write a comprehensive digest article (400-600 words MAX) that:\n   - Starts with: \"# 3-Day Digest: [dominant_topic] | {{ $json.period.start }} {{ $json.period.end }}\\n\\n\"\n   - Opens with the theme_sentence as a bold intro\n   - Groups items by narrative/theme (not just a list)\n   - Highlights business/career implications for {{ $json.topic }} professionals\n   - Uses markdown formatting (##, **, links)\n   - Ends with \"What to watch next\" forward-looking paragraph (50 words max)\n   - Includes all item URLs as inline links\n   - Professional, analytical tone suitable for LinkedIn\n   - CRITICAL: Keep total length under 600 words to ensure it fits in 5 Notion blocks\n\n4. linkedinposttext: Create a LinkedIn post (150-200 characters) in this exact format:\n   \"📊 3-Day {{ $json.topic }} Digest: [dominant_topic] – [theme_sentence] Read the full analysis: [will be added] #{{ $json.topic }}Digest #ProfessionalInsights\"\n\nRETURN ONLY THIS JSON (no markdown blocks, no explanations):\n{\n  \"dominant_topic\": \"string (3-5 words)\",\n  \"theme_sentence\": \"string (15-25 words)\",\n  \"fullmarkdown\": \"string (complete markdown article)\",\n  \"linkedinposttext\": \"string (LinkedIn post)\"\n}\n\nCRITICAL REMINDER: Your response must be valid JSON with NO quotes or apostrophes in the text content. Replace \"it's\" with \"it is\", \"don't\" with \"do not\", etc. All newlines must be \\\\n. Test your JSON before returning."
+            }
+          ]
+        },
+        "options": {
+          "system": "=You are a professional content strategist creating 3-Day Digests for {{ $json.topic }} audiences.\n\nCRITICAL OUTPUT REQUIREMENTS:\nYou MUST return valid JSON. Use ONLY these characters in text:\n- Letters (A-Z, a-z)\n- Numbers (0-9)\n- Basic punctuation: . , ! ? ( )\n- Spaces\n\nFORBIDDEN CHARACTERS (will break JSON):\n- NO quotes: \" or '\n- NO apostrophes: it's → it is, don't → do not\n- NO em dashes: — → use hyphen -\n- NO special punctuation: …, –, ', ', \", \"\n- NO unescaped backslashes\n\nSAFE TEXT RULES:\n1. Replace contractions: \"it's\" → \"it is\", \"don't\" → \"do not\"\n2. Replace em dashes: \"—\" → \"-\"\n3. Replace special quotes: \"text\" → text (no quotes)\n4. Use \\\\n for line breaks (escaped backslash-n)\n5. Test JSON validity before returning\n\nTONE: Professional, analytical, confident.\n\nAUDIENCE: {{ $json.topic }} professionals seeking actionable insights.",
+          "maxTokens": 10000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        -176
+      ],
+      "id": "24b2d6f7-a904-40e3-91a7-5d17d25a4814",
+      "name": "Message a model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "zohjaYIKPyKWsYjE",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Universal LLM JSON parser (Claude + Gemini compatible)\nconst inputData = $input.first().json || {};\nlet parsedData = {};\nlet jsonText = '';\n\ntry {\n  // Extract text from different LLM response structures\n  \n  // Claude format: content[0].text\n  if (inputData.content && Array.isArray(inputData.content)) {\n    jsonText = inputData.content[0]?.text || '';\n  }\n  // Gemini format: text or content (string)\n  else {\n    jsonText = inputData.text || \n               inputData.content || \n               inputData.message?.content?.[0]?.text || \n               '';\n  }\n  \n  // Remove markdown code blocks - multiple approaches\n  // 1. Try regex first\n  let jsonMatch = jsonText.match(/```(?:json)?\\s*([\\s\\S]*?)\\s*```/);\n  if (jsonMatch) {\n    jsonText = jsonMatch[1];\n  } else {\n    // 2. Manual cleanup if regex fails\n    jsonText = jsonText\n      .replace(/^```json\\s*/i, '')  // Remove opening ```json\n      .replace(/^```\\s*/, '')        // Remove opening ```\n      .replace(/\\s*```$/, '');       // Remove closing ```\n  }\n  \n  // Clean up the text\n  jsonText = jsonText.trim();\n  \n  // Parse the JSON\n  parsedData = JSON.parse(jsonText);\n  \n} catch (error) {\n  // Return detailed error for debugging\n  const errorPos = error.message.match(/position (\\d+)/)?.[1];\n  \n  return [{\n    json: {\n      error: 'JSON PARSING FAILED',\n      error_message: error.message,\n      error_position: errorPos || 'unknown',\n      raw_text_preview: jsonText.substring(0, 500),\n      raw_text_around_error: errorPos \n        ? jsonText.substring(Math.max(0, parseInt(errorPos) - 100), parseInt(errorPos) + 100)\n        : jsonText.substring(0, 200)\n    }\n  }];\n}\n\n// Return in n8n format\nreturn [{\n  json: parsedData\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        -176
+      ],
+      "id": "0d6dea07-59b1-4f92-9ada-a19f7a3cbc79",
+      "name": "Parse Output"
+    },
+    {
+      "parameters": {
+        "jsCode": "const periodData = $('Read System State').first().json;\n\n// Check which path we came from\nconst existingDigest = $('Check Existing Digest').first().json;\nconst hasExisting = existingDigest && existingDigest.id !== null;\n\n// Check if we created a new digest (came from TRUE branch of IF)\nlet digestId = null;\nlet dominantTopic = null;\nlet event = 'no_items_to_digest';\n\nif (hasExisting) {\n  event = 'digest_already_exists';\n  digestId = existingDigest.id;\n} else {\n  try {\n    const insertNode = $('Insert Into digests Table').all();\n    if (insertNode.length > 0 && insertNode[0].json.id) {\n      event = 'digest_created';\n      digestId = insertNode[0].json.id;\n      dominantTopic = insertNode[0].json.dominant_topic;\n    }\n  } catch (error) {\n    // Insert didn't run (no items path)\n  }\n}\n\nreturn [{\n  json: {\n    topic: 'unknown',\n    workflow_id: 3,\n    event: event,\n    status: 'success',\n    details: {\n      period_start: periodData.period_start,\n      period_end: periodData.period_end,\n      digest_id: digestId,\n      dominant_topic: dominantTopic\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2144,
+        -96
+      ],
+      "id": "1b68ce19-1dcd-447c-b63e-e59f626c106f",
+      "name": "Create Log"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (topic, workflow_id, event, status, details)\nVALUES ($1, $2, $3, $4, $5)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [   $json.topic,   $json.workflow_id,   $json.event,   $json.status,   JSON.stringify($json.details) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2368,
+        -96
+      ],
+      "id": "0b7dac74-ff58-4d68-abee-a26f5f9f86aa",
+      "name": "Store Log",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        -192
+      ],
+      "id": "fadca86c-1136-4dfb-847e-2d5fb552c4d0",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  value->>'current_topic' as topic,\n  value->>'period_start' as period_start,\n  value->>'period_end' as period_end\nFROM system_state\nWHERE key = 'current_cycle';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        -192
+      ],
+      "id": "29b2067f-edaa-47ec-a60c-c38536a249d3",
+      "name": "Read System State",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Vs1FmO78SYNxZI10",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/Vs1FmO78SYNxZI10",
+          "cachedResultName": "04 – Distribution"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2592,
+        -96
+      ],
+      "id": "766a403b-b9c7-4f15-86c3-8ebdd018bf74",
+      "name": "Call '04 – Distribution'"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "51406566-b86f-4e56-8dfd-d8ffef8fd3e8",
+              "leftValue": "={{ Object.keys($input.first().json).length > 1 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "cbb27f6c-f799-4eea-a513-ae0afbab85aa",
+              "leftValue": "={{ !$('Check Existing Digest').first().json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        -96
+      ],
+      "id": "d62d2b1c-be6c-49e0-b342-7d43e9ec64cf",
+      "name": "Check if Items Exist"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, run_date \nFROM digests\nWHERE period_start = $1::date \n  AND period_end = $2::date\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ [$('Read System State').first().json.period_start, $('Read System State').first().json.period_end] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        -192
+      ],
+      "id": "b24a6c73-e479-4d72-a0c7-05f5afc08182",
+      "name": "Check Existing Digest",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Select Items to draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Items to draft": {
+      "main": [
+        [
+          {
+            "node": "Check if Items Exist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Results": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Into digests Table": {
+      "main": [
+        [
+          {
+            "node": "Create Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Parse Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Output": {
+      "main": [
+        [
+          {
+            "node": "Insert Into digests Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Log": {
+      "main": [
+        [
+          {
+            "node": "Store Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Read System State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Log": {
+      "main": [
+        [
+          {
+            "node": "Call '04 – Distribution'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read System State": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Items Exist": {
+      "main": [
+        [
+          {
+            "node": "Parse Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Digest": {
+      "main": [
+        [
+          {
+            "node": "Select Items to draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "TdW6eoOMApL7vEoL",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "7bb5cbe8-49d6-4691-aed9-4e98d1a6593c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cfe06626ec763e2df5f517d1ba577eaa29b09414c32e98b1ca767e9d11ce0db8"
+  },
+  "id": "iVL1Ij7wEHBuqNma",
+  "tags": []
+}

@@ -1,0 +1,600 @@
+{
+  "name": "04 – Distribution",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -64
+      ],
+      "id": "d7a6d118-7ed5-4803-b386-b9eecc24bc4c",
+      "name": "When clicking ‘Execute workflow’",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  id,\n  run_date,\n  period_start,\n  period_end,\n  full_markdown,\n  linkedin_post_text\nFROM digests\nWHERE published_at IS NULL\nORDER BY run_date DESC;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        224,
+        -160
+      ],
+      "id": "c5949cf8-48c6-436e-85db-79945d206948",
+      "name": "Select Digest",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "value": "2fd4ff51-c286-8124-abd0-e02ef0d3d36b",
+          "mode": "list",
+          "cachedResultName": "Content Calendar Database",
+          "cachedResultUrl": "https://www.notion.so/2fd4ff51c2868124abd0e02ef0d3d36b"
+        },
+        "title": "={{ $json.notion_title }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Digest ID|number",
+              "numberValue": "={{$json[\"id\"]}}"
+            },
+            {
+              "key": "Period|date",
+              "range": true,
+              "includeTime": false,
+              "dateStart": "={{ $json.period_start }}",
+              "dateEnd": "={{ $json.period_end }}"
+            },
+            {
+              "key": "Run Date|date",
+              "date": "={{ $json.run_date }}"
+            },
+            {
+              "key": "Status|status",
+              "statusValue": "Idea"
+            },
+            {
+              "key": "Channel|select",
+              "selectValue": "Newsletter + LinkedIn"
+            },
+            {
+              "key": "LinkedIn Draft|rich_text",
+              "richText": true,
+              "text": {
+                "text": [
+                  {
+                    "text": "={{ $json.linkedin_post_text }}",
+                    "annotationUi": {}
+                  }
+                ]
+              }
+            },
+            {
+              "key": "Topic|rich_text",
+              "textContent": "={{ $json.topic_category }}"
+            },
+            {
+              "key": "Infographic Prompt|rich_text",
+              "textContent": "={{ $json.infographic_prompt }}"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "textContent": "={{ $json.markdown_block_1 }}"
+            },
+            {
+              "textContent": "={{ $json.markdown_block_2 }}"
+            },
+            {
+              "textContent": "={{ $json.markdown_block_3 }}"
+            },
+            {
+              "textContent": "={{ $json.markdown_block_4 }}"
+            },
+            {
+              "textContent": "={{ $json.markdown_block_5 }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        -240
+      ],
+      "id": "497c529e-d980-4f5b-8460-603df624ceff",
+      "name": "Create Notion digest page",
+      "credentials": {
+        "notionApi": {
+          "id": "1N5C7JZ10DaNjiGb",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "folderId": "1SXoV1fSh38eisqhY__3HJC4tC7RprYF2",
+        "title": "={{ $('Split Markdown').first().json.gdoc_title }}"
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -240
+      ],
+      "id": "891ec5cd-c16b-4ea6-a91e-306510faf319",
+      "name": "Create Google Doc digest",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "VTNkpBUH1eGImFIq",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentURL": "={{ $node[\"Create Google Doc digest\"].json[\"documentId\"] || $node[\"Create Google Doc digest\"].json[\"id\"] }}",
+        "actionsUi": {
+          "actionFields": [
+            {
+              "action": "insert",
+              "text": "={{ $('Select Digest').item.json.full_markdown }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        -240
+      ],
+      "id": "63befcc1-8dfc-4214-948b-040b8442907e",
+      "name": "Update with Markdown",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "VTNkpBUH1eGImFIq",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  s.*, \n  d.dominant_topic, \n  d.topic_category,\n  d.period_start,\n  d.period_end,\n  string_agg(DISTINCT src.name, ', ' ORDER BY src.name) as source_names\nFROM infographic_styles s \nJOIN digests d ON s.topic_category = d.topic_category \nJOIN items i ON i.published_at::date >= d.period_start \n             AND i.published_at::date <= d.period_end\nJOIN sources src ON src.id = i.source_id\nWHERE d.id = $1 \nGROUP BY s.id, s.topic_category, s.base_prompt, s.primary_color, s.secondary_color, \n         s.accent_color, s.created_at, d.dominant_topic, d.topic_category, \n         d.period_start, d.period_end\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ [$('Select Digest').item.json.id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        -240
+      ],
+      "id": "a76e76c1-6d8d-47ae-989b-f6149081ebc2",
+      "name": "Style Lookup",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// SPLIT MARKDOWN INTO NOTION-SAFE BLOCKS\n// ============================================\n\n// Get the input data from previous node\nconst data = $input.first().json;\n\n// Function to split markdown text into chunks that fit Notion's block size limits\nfunction splitMarkdown(text, maxLength = 1900) {\n  const chunks = [];        // Array to store the split chunks\n  let current = '';         // Current chunk being built\n  \n  // Split the full markdown by double newlines (paragraph breaks)\n  // This keeps paragraphs together instead of cutting mid-paragraph\n  const paragraphs = text.split('\\n\\n');\n  \n  // Loop through each paragraph\n  for (const para of paragraphs) {\n    // Check if adding this paragraph would exceed the max length\n    if ((current + para).length > maxLength && current) {\n      // Current chunk is full, save it and start a new one\n      chunks.push(current.trim());\n      current = para;  // Start new chunk with current paragraph\n    } else {\n      // There's room, add this paragraph to current chunk\n      // Add '\\n\\n' separator if current chunk already has content\n      current += (current ? '\\n\\n' : '') + para;\n    }\n  }\n  \n  // Don't forget to push the last chunk if it has content\n  if (current) {\n    chunks.push(current.trim());\n  }\n  \n  return chunks;  // Return array of markdown chunks\n}\n\n// Split the full markdown into chunks\nconst markdownChunks = splitMarkdown(data.full_markdown);\n\n// ============================================\n// RETURN DATA WITH SPLIT BLOCKS\n// ============================================\n\nreturn [{\n  json: {\n    ...data,  // Keep all existing fields (id, topic, etc.)\n    // Add up to 5 markdown blocks (empty string if chunk doesn't exist)\n    markdown_block_1: markdownChunks[0] || '',\n    markdown_block_2: markdownChunks[1] || '',\n    markdown_block_3: markdownChunks[2] || '',\n    markdown_block_4: markdownChunks[3] || '',\n    markdown_block_5: markdownChunks[4] || '',\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -240
+      ],
+      "id": "38be462b-a9ac-44f3-9596-13ccfa212058",
+      "name": "Split Markdown"
+    },
+    {
+      "parameters": {
+        "jsCode": "const digest = $('Select Digest').item.json;\nconst style = $('Style Lookup').first().json;\n\n// Topic emojis\nconst topicEmojis = { 'AI': '🤖', 'Finance': '💰', 'Music': '🎵', 'Science': '🔬' };\nconst topic = style.topic_category;\nconst emoji = topicEmojis[topic] || '📊';\n\n// Period display\nconst periodStart = digest.period_start.split('T')[0];\nconst periodEnd = digest.period_end.split('T')[0];\nconst periodDisplay = `${periodStart} ${periodEnd}`;\n\n// Topic-specific content\nconst topicConfig = {\n  'AI': {\n    audience: 'recruiters and talent leaders',\n    title: 'AI News',\n    cta: 'Stay ahead of AI talent trends'\n  },\n  'Finance': {\n    audience: 'investors and financial advisors',\n    title: 'Finance News',\n    cta: 'Track market insights'\n  },\n  'Music': {\n    audience: 'industry professionals and artists',\n    title: 'Music Industry News',\n    cta: 'Stay ahead of music trends'\n  },\n  'Science': {\n    audience: 'researchers and science professionals',\n    title: 'Science News',\n    cta: 'Discover breakthrough research'\n  }\n};\n\nconst config = topicConfig[topic] || { audience: 'professionals', title: `${topic} News`, cta: 'Stay informed' };\n\n// Extract theme sentence from digest\nconst themeSentence = digest.dominant_topic || `${topic} trends emerging`;\n\n// Extract sources from Style Lookup\nconst sources = style.source_names || 'various sources';\n\n// BUILD INFOGRAPHIC PROMPT\nconst blocks = [];\n\n// BLOCK 1: Intro with audience\nblocks.push(`Modern corporate infographic for ${topic} news digest targeting ${config.audience}.`);\n\n// BLOCK 2: Design (using colors from style table)\nblocks.push(`DESIGN: ${style.primary_color || '#0F172A'} background, ${style.secondary_color || '#38BDF8'} headers, ${style.accent_color || '#06BDF4'} cards/metrics, off-white text (#F1F5F9). Inter font family. Clean minimal style, generous whitespace, 3-column grid.`);\n\n// BLOCK 3: Structure\nblocks.push(`STRUCTURE:\n1. Subtle header\n2. Title: \"${config.title}\" + theme: \"${themeSentence}\"\n3. 3-4 highlighted key metrics/stats (large numbers)\n4. 3 bullet insights\n5. CTA button: \"${config.cta}\"\n6. Subtle footer`);\n\n// BLOCK 4: Header\nblocks.push(`HEADER:\n- Top left: \"The 3-Days News Digest\"\n- Top right: ${periodDisplay}`);\n\n// BLOCK 5: Footer\nblocks.push(`FOOTER:\n- Sources: ${sources}\n- Automation stack: n8n + Postgres\n- Processed by AI`);\n\n// BLOCK 6: Quality checks (static)\nblocks.push(`QUALITY CHECKS (MANDATORY):\n- PERFECT TEXT: Crisp, readable letters—no garbling, distortion, illegible words, or overlapping\n- NO ARTIFACTS: Clean edges, no floating elements, no blurry gradients or pixelation\n- ACCURATE DATA: Every metric/insight DIRECTLY from source—NO invented numbers\n- HIGH CONTRAST: All text 4.5:1 ratio minimum, fully legible on mobile\n- SIMPLE SHAPES: Sharp rectangles/circles only—no complex patterns or textures\n- ALIGNED ELEMENTS: Perfect grid alignment, equal spacing, no overlaps\n\nElegant, professional, high-contrast, no clutter. Generate flawless typography and source-accurate content.\n\nREFINEMENTS:\n- Metric numbers LARGER/bolder (e.g., \"3 Pillars\" → \"3\" huge with accent color)\n- Bullet dots → numbered icons (1,2,3) for scannability\n- CTA: Add subtle shadow/glow for 3D pop\n- Header and footer: Slightly smaller (reduce clutter)`);\n\n// Return all data\nreturn [{\n  json: {\n    ...digest,\n    ...style,\n    topic_emoji: emoji,\n    period_display: periodDisplay,\n    infographic_prompt: blocks.join('\\n\\n'),\n    notion_title: `${emoji} 3-Day ${topic} Digest: ${style.dominant_topic}`,\n    email_subject: `${emoji} Your 3-Day ${topic} Digest is Ready!`,\n    gdoc_title: `${topic} Digest | ${periodDisplay}`\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -240
+      ],
+      "id": "ecc8b668-2708-401b-b100-7ca93260050e",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "={{ $('Split Markdown').item.json.topic_emoji }} LinkedIn draft – {{ $('Split Markdown').item.json.topic_category }} Digest {{ $('Split Markdown').item.json.id }}",
+        "message": "=<p><strong>{{ $('Split Markdown').first().json.topic_emoji }} {{ $('Split Markdown').first().json.topic_category }} Digest – {{ $('Split Markdown').first().json.period_display }}</strong></p>\n\n<p><strong>Digest ID:</strong> {{ $('Split Markdown').first().json.id }}<br>\n<strong>Notion page:</strong> <a href=\"{{ $node[\"Create Notion digest page\"].json[\"url\"] }}\">Open in Notion</a><br>\n<strong>Google Doc:</strong> <a href=\"https://docs.google.com/document/d/{{ $node[\"Create Google Doc digest\"].json[\"documentId\"] || $node[\"Create Google Doc digest\"].json[\"id\"] }}/edit\">Open in Google Docs</a><br>\n<strong>Theme:</strong> {{ $('Split Markdown').first().json.dominant_topic }}</p>\n\n<hr>\n\n<p><strong>LinkedIn draft proposal:</strong></p>\n<div style=\"background: #f0f0f0; padding: 15px; border-left: 4px solid {{ $('Split Markdown').first().json.primary_color }}; font-family: sans-serif;\">\n{{ $('Split Markdown').first().json.linkedin_post_text }}\n</div>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2016,
+        -240
+      ],
+      "id": "01ba2271-1037-4d71-8eec-b80380768019",
+      "name": "Send Mail",
+      "webhookId": "458bb0a5-83cf-421d-9423-e523ee100167",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "xkqnwMoxgak1PFn4",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if we distributed a digest (Send Mail node executed)\nlet hasDistribution = false;\nlet notionUrl = null;\nlet gdocId = null;\n\ntry {\n  // Try to get distribution results\n  const sendMailNode = $('Send Mail').all();\n  hasDistribution = sendMailNode.length > 0;\n  \n  if (hasDistribution) {\n    // Get Notion URL\n    const notionNode = $('Create Notion digest page').all();\n    if (notionNode.length > 0 && notionNode[0].json.url) {\n      notionUrl = notionNode[0].json.url;\n    }\n    \n    // Get Google Doc ID\n    const gdocNode = $('Create Google Doc digest').all();\n    if (gdocNode.length > 0 && gdocNode[0].json.documentId) {\n      gdocId = gdocNode[0].json.documentId;\n    }\n  }\n} catch (error) {\n  // Nodes didn't execute (FALSE branch), hasDistribution remains false\n  hasDistribution = false;\n}\n\nreturn [{\n  json: {\n    topic: 'unknown',\n    workflow_id: 4,\n    event: hasDistribution ? 'distribution_complete' : 'no_digest_to_distribute',\n    status: 'success',\n    details: hasDistribution ? {\n      notion_url: notionUrl,\n      gdoc_id: gdocId,\n      email_sent: true\n    } : {\n      message: 'No unpublished digest found'\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        -160
+      ],
+      "id": "4bc9c45b-ba20-42aa-8cde-2be9a25cbbe2",
+      "name": "Create Log"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (topic, workflow_id, event, status, details)\nVALUES ($1, $2, $3, $4, $5)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [   $json.topic,   $json.workflow_id,   $json.event,   $json.status,   JSON.stringify($json.details) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2672,
+        -160
+      ],
+      "id": "eefc6dbc-1661-4f3b-9065-5266513fc648",
+      "name": "Store Log",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        -256
+      ],
+      "id": "e6283476-e10c-4050-b7c9-3295efde0551",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "url": "CRONITOR_DISTRIBUTION_URL",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2896,
+        -160
+      ],
+      "id": "85c7a003-35e4-4210-ae7a-4a9113ba42b8",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Ah8tQ8NLtmlYY2Ty",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/Ah8tQ8NLtmlYY2Ty",
+          "cachedResultName": "06 - Purger"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        3120,
+        -160
+      ],
+      "id": "d88dbaff-7c01-4f7a-837c-eafc1616c313",
+      "name": "Call '06 - Purger'"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f1f95011-c9bc-4328-a77a-614fe2cb6e89",
+              "leftValue": "={{ Object.keys($input.first().json).length > 1 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        -160
+      ],
+      "id": "23209c3f-4df9-4f0f-8cef-3bb2fafe6644",
+      "name": "Check if Digest Exists"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE digests\nSET published_at = NOW()\nWHERE id = $1\nRETURNING id, published_at;",
+        "options": {
+          "queryReplacement": "={{ [$('Select Digest').first().json.id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2224,
+        -240
+      ],
+      "id": "c44222bd-401a-4ebe-8b1b-fac21304de3d",
+      "name": "Mark Digest as Published",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Select Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Digest": {
+      "main": [
+        [
+          {
+            "node": "Check if Digest Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Notion digest page": {
+      "main": [
+        [
+          {
+            "node": "Create Google Doc digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Google Doc digest": {
+      "main": [
+        [
+          {
+            "node": "Update with Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update with Markdown": {
+      "main": [
+        [
+          {
+            "node": "Send Mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Style Lookup": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Markdown": {
+      "main": [
+        [
+          {
+            "node": "Create Notion digest page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Split Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Mail": {
+      "main": [
+        [
+          {
+            "node": "Mark Digest as Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Log": {
+      "main": [
+        [
+          {
+            "node": "Store Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Select Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Log": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Call '06 - Purger'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Digest Exists": {
+      "main": [
+        [
+          {
+            "node": "Style Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Digest as Published": {
+      "main": [
+        [
+          {
+            "node": "Create Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "TdW6eoOMApL7vEoL",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "b1598dd2-50f7-4b4e-a726-3196be3d0cea",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cfe06626ec763e2df5f517d1ba577eaa29b09414c32e98b1ca767e9d11ce0db8"
+  },
+  "id": "Vs1FmO78SYNxZI10",
+  "tags": []
+}

@@ -1,0 +1,293 @@
+{
+  "name": "06 - Purger",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -528,
+        48
+      ],
+      "id": "1df2fdbb-1db7-4386-b35c-bd1acc238cfe",
+      "name": "When clicking ‘Execute workflow’",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM logs\nWHERE timestamp < NOW() - ($1 || ' days')::INTERVAL\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$('Purge Config').first().json.purge_interval] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -80,
+        48
+      ],
+      "id": "f2be6335-7597-4fa4-b353-ebcbc7870e7b",
+      "name": "Purge Logs",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// PURGE CONFIGURATION\n// ============================================\n\n// Change this value to adjust purge interval:\n// - Testing: 3 days\n// - Production: 30 days\nconst PURGE_DAYS = 30;\n\nreturn [{\n  json: {\n    purge_days: PURGE_DAYS,\n    purge_interval: `${PURGE_DAYS} days`,  // For SQL\n    purge_before: new Date(Date.now() - PURGE_DAYS * 24 * 60 * 60 * 1000).toISOString().split('T')[0]\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        48
+      ],
+      "id": "9433d755-a540-4bf6-bc8b-43453e3a4436",
+      "name": "Purge Config"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM item_enriched\nWHERE item_id IN (\n  SELECT id FROM items\n  WHERE published_at < NOW() - ($1 || ' days')::INTERVAL\n)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$('Purge Config').first().json.purge_interval] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        144,
+        48
+      ],
+      "id": "346e7ac4-ec90-47e0-bdf5-c84b059577be",
+      "name": "Purge item_enriched",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM items\nWHERE published_at < NOW() - ($1 || ' days')::INTERVAL\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$('Purge Config').first().json.purge_interval] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        368,
+        48
+      ],
+      "id": "792a4d2a-ccfa-499b-97dd-c2f231ff2622",
+      "name": "Purge items",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM digests\nWHERE run_date < NOW() - ($1 || ' days')::INTERVAL\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$('Purge Config').first().json.purge_interval] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        592,
+        48
+      ],
+      "id": "4e9e7819-c7c4-4e8c-95ba-f2e1aec33969",
+      "name": "Purge digests",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const config = $('Purge Config').first().json;\n\n// Count actual deleted items (filter out empty items from \"Always Output Data\")\nconst logsDeleted = $('Purge Logs').all().filter(item => item.json.id).length;\nconst enrichedDeleted = $('Purge item_enriched').all().filter(item => item.json.id).length;\nconst itemsDeleted = $('Purge items').all().filter(item => item.json.id).length;\nconst digestsDeleted = $('Purge digests').all().filter(item => item.json.id).length;\n\nconst totalDeleted = logsDeleted + enrichedDeleted + itemsDeleted + digestsDeleted;\n\nreturn [{\n  json: {\n    topic: 'system',\n    workflow_id: 6,\n    event: 'purge_complete',\n    status: 'success',\n    details: {\n      purge_days: config.purge_days,\n      logs_deleted: logsDeleted,\n      enriched_deleted: enrichedDeleted,\n      items_deleted: itemsDeleted,\n      digests_deleted: digestsDeleted,\n      total_deleted: totalDeleted\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        48
+      ],
+      "id": "00e95fa0-6f55-4413-8c0b-e662f6d921e3",
+      "name": "Create Log"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (topic, workflow_id, event, status, details)\nVALUES ($1, $2, $3, $4, $5)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [   $json.topic,   $json.workflow_id,   $json.event,   $json.status,   JSON.stringify($json.details) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1040,
+        48
+      ],
+      "id": "2a1a00d6-1c13-4e92-b13b-87a601d4796d",
+      "name": "Store Log",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Change days interval inside Config node.\n0 = purge all",
+        "height": 80,
+        "width": 192
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -416,
+        240
+      ],
+      "typeVersion": 1,
+      "id": "9e1044fc-3b0a-4b25-bdb5-1e03b8051673",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -528,
+        -144
+      ],
+      "id": "a3808769-f3c2-4682-8188-1e2fe74633a3",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Purge Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Purge Config": {
+      "main": [
+        [
+          {
+            "node": "Purge Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Purge Logs": {
+      "main": [
+        [
+          {
+            "node": "Purge item_enriched",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Purge item_enriched": {
+      "main": [
+        [
+          {
+            "node": "Purge items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Purge items": {
+      "main": [
+        [
+          {
+            "node": "Purge digests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Purge digests": {
+      "main": [
+        [
+          {
+            "node": "Create Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Log": {
+      "main": [
+        [
+          {
+            "node": "Store Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Purge Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "TdW6eoOMApL7vEoL",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "edce0836-9d2a-48f5-8ee7-4292288a1e70",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cfe06626ec763e2df5f517d1ba577eaa29b09414c32e98b1ca767e9d11ce0db8"
+  },
+  "id": "Ah8tQ8NLtmlYY2Ty",
+  "tags": []
+}

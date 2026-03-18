@@ -1,0 +1,185 @@
+{
+  "name": "05 - Error Logger",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "9cfe9fb4-7e2d-4d66-9483-9667a5b48a58",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// Extract workflow ID from name\nfunction getWorkflowId(workflowName) {\n  if (!workflowName) return null;\n  if (workflowName.includes('00') || workflowName.includes('Cycle Manager')) return 0;\n  if (workflowName.includes('01') || workflowName.includes('Feed Collection')) return 1;\n  if (workflowName.includes('02') || workflowName.includes('Enrichment')) return 2;\n  if (workflowName.includes('03') || workflowName.includes('Digest Generation')) return 3;\n  if (workflowName.includes('04') || workflowName.includes('Distribution')) return 4;\n  if (workflowName.includes('06') || workflowName.includes('Purger')) return 6;\n  return null;\n}\n\nreturn [{\n  json: {\n    topic: 'unknown',\n    workflow_id: getWorkflowId(data.workflow?.name),\n    event: 'error',\n    status: 'error',\n    details: {\n      error_message: data.execution?.error?.message || 'Unknown error',\n      error_node: data.execution?.lastNodeExecuted || 'unknown',\n      workflow_name: data.workflow?.name || 'unknown',\n      execution_id: data.execution?.id || 'unknown',\n      execution_url: data.execution?.url || '',\n      timestamp: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "a1de3b6e-843c-439a-b84c-fc416cb666fc",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (topic, workflow_id, event, status, details)\nVALUES ($1, $2, $3, $4, $5)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [   $json.topic,   $json.workflow_id,   $json.event,   $json.status,   JSON.stringify($json.details) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        0
+      ],
+      "id": "33e0b64e-13f9-49b3-98d9-dfa9f1e2fdca",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.details.error_message }}",
+              "rightValue": "user cancelled",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            },
+            {
+              "id": "2",
+              "leftValue": "={{ $json.details.error_message }}",
+              "rightValue": "aborted",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            },
+            {
+              "id": "3",
+              "leftValue": "={{ $json.details.error_message }}",
+              "rightValue": "timeout",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "a76d65ef-5a78-4b5e-9125-d02ee9b3832c",
+      "name": "Filter Trivial Errors"
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL",
+        "subject": "=⚠️ n8n Error - Workflow {{ $('Code in JavaScript').first().json.details.workflow_name }}",
+        "message": "=<p><strong>⚠️ Workflow Error Detected</strong></p>\n\n<p><strong>Workflow:</strong> {{ $('Code in JavaScript').first().json.details.workflow_name }}</p>\n\n<p><strong>Error Node:</strong> {{ $('Code in JavaScript').first().json.details.error_node }}</p>\n\n<p><strong>Error Message:</strong><br>\n{{ $('Code in JavaScript').first().json.details.error_message }}</p>\n\n<p><strong>Execution ID:</strong> {{ $('Code in JavaScript').first().json.details.execution_id }}</p>\n\n<p><strong>Timestamp:</strong> {{ $('Code in JavaScript').first().json.details.timestamp }}</p>\n\n<hr>\n\n<p><a href=\"{{ $('Code in JavaScript').first().json.details.execution_url }}\">View Execution in n8n</a></p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        0
+      ],
+      "id": "059c733e-e985-4581-9438-b689552ab24a",
+      "name": "Send a message",
+      "webhookId": "0101179e-735d-4958-8736-39d03ad7eec4",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "xkqnwMoxgak1PFn4",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Filter Trivial Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Trivial Errors": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "8866cfc6-7511-4245-a6f8-cd21e80d30e7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cfe06626ec763e2df5f517d1ba577eaa29b09414c32e98b1ca767e9d11ce0db8"
+  },
+  "id": "TdW6eoOMApL7vEoL",
+  "tags": []
+}

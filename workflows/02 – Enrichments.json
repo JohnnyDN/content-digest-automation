@@ -1,0 +1,536 @@
+{
+  "name": "02 – Enrichments",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1344,
+        208
+      ],
+      "id": "14883346-4cd7-4b5b-96c3-864d82e38852",
+      "name": "When clicking ‘Execute workflow’",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  i.id AS item_id,\n  i.source_id,\n  i.title,\n  i.url,\n  i.published_at,\n  i.raw_content\nFROM items i\nLEFT JOIN item_enriched ie ON ie.item_id = i.id\nWHERE ie.item_id IS NULL\n  AND i.published_at::date >= $1\n  AND i.published_at::date <= $2\nORDER BY i.id;",
+        "options": {
+          "queryReplacement": "={{ [$('Read System State').item.json.period_start, $('Read System State').item.json.period_end] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -896,
+        112
+      ],
+      "id": "c0dabba4-0a7d-4b1c-88b7-19add3eaf89e",
+      "name": "Select Items to Enrich",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO item_enriched (\n  item_id,\n  language,\n  category,\n  tags,\n  short_summary,\n  detailed_summary,\n  importance_score,\n  virality_score\n)\nVALUES (\n  (($1::json)->>'item_id')::integer,\n  ($1::json)->>'language',\n  ($1::json)->>'category',\n  (($1::json)->'tags')::jsonb,\n  ($1::json)->>'short_summary',\n  ($1::json)->>'detailed_summary',\n  NULLIF((($1::json)->>'importance_score')::text, '')::numeric,\n  NULLIF((($1::json)->>'virality_score')::text, '')::numeric\n)\nON CONFLICT (item_id) DO NOTHING;\n",
+        "options": {
+          "queryReplacement": "={{ [ $json ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        800,
+        -64
+      ],
+      "id": "e844ccb8-640f-4f8b-bf9f-02c295b11a55",
+      "name": "Populate items_enriched Table",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "claude-sonnet-4-5-20250929",
+          "mode": "list",
+          "cachedResultName": "claude-sonnet-4-5-20250929"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=TASK: Analyze {{ $json.items.length }} articles for a {{ $json.topic }} digest (Batch {{ $json.batch_info.batch_number }}/{{ $json.batch_info.total_batches }}).\n\nARTICLES:\n{{ JSON.stringify($json.items, null, 2) }}\n\nREQUIRED OUTPUT FORMAT - CRITICAL:\nReturn ONLY a JSON array with {{ $json.items.length }} objects, one per article, in exact order.\n\nEXACT STRUCTURE (no variations):\n[\n  {\n    \"language\": \"en\",\n    \"category\": \"category_name\",\n    \"tags\": [\"tag1\", \"tag2\", \"tag3\"],\n    \"short_summary\": \"2-3 sentence summary for non-technical readers.\",\n    \"detailed_summary\": \"1-3 paragraphs with context and implications.\",\n    \"importance_score\": 0.85,\n    \"virality_score\": 0.70\n  }\n]\n\nSTRICT RULES:\n- NO wrapper objects (no \"digest\", no \"articles\", just the array)\n- NO markdown blocks or code fences\n- NO contractions (use: it is, do not, cannot)\n- NO special quotes or dashes (use plain - not — or –)\n- Start with [ and end with ]\n- Return {{ $json.items.length }} complete objects\n\nBEGIN OUTPUT NOW:"
+            }
+          ]
+        },
+        "simplify": false,
+        "options": {
+          "maxTokens": 8000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        224,
+        -64
+      ],
+      "id": "29c4729e-cc13-4154-8e04-763e7f4a1627",
+      "name": "Message a model1",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "anthropicApi": {
+          "id": "zohjaYIKPyKWsYjE",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Robust parser for batch arrays\nconst allInputs = $input.all();\nconst sourceItems = $('Prepare Batch for LLM').first().json.items;\nconst results = [];\n\nfor (let i = 0; i < allInputs.length; i++) {\n  const inputData = allInputs[i].json || {};\n  let jsonText = '';\n\n  try {\n    // Extract text\n    if (inputData.content && Array.isArray(inputData.content)) {\n      jsonText = inputData.content[0]?.text || '';\n    } else {\n      jsonText = inputData.text || inputData.content || '';\n    }\n    \n    // Remove markdown blocks\n    jsonText = jsonText\n      .replace(/^```json\\s*/i, '')\n      .replace(/^```\\s*/, '')\n      .replace(/\\s*```$/, '')\n      .trim();\n    \n    // Extract array if wrapped\n    const arrayMatch = jsonText.match(/\\[\\s*\\{[\\s\\S]*\\]/);\n    if (arrayMatch) {\n      jsonText = arrayMatch[0];\n    }\n    \n    // Parse the array\n    const parsedArray = JSON.parse(jsonText);\n    \n    // Validate it's an array\n    if (!Array.isArray(parsedArray)) {\n      throw new Error('Output is not an array');\n    }\n    \n    // Add item_id to each object and add to results\n    parsedArray.forEach((item, idx) => {\n      const sourceData = sourceItems[idx];\n      results.push({\n        json: {\n          ...item,\n          item_id: sourceData.item_id\n        }\n      });\n    });\n    \n  } catch (error) {\n    // Failed - return error\n    results.push({\n      json: {\n        error: 'JSON PARSING FAILED',\n        error_message: error.message,\n        raw_preview: jsonText.substring(0, 500),\n        item_id: sourceItems[0]?.item_id || 'unknown'\n      }\n    });\n  }\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        -64
+      ],
+      "id": "1b725879-da1f-4bde-9396-119fd59e7f1c",
+      "name": "Parse Output"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split items into batches of 5 and include topic\nconst items = $input.all();\nconst topic = $('Read System State').item.json.topic;  // ← Get topic\nconst BATCH_SIZE = 5;\nconst batches = [];\n\nfor (let i = 0; i < items.length; i += BATCH_SIZE) {\n  batches.push({\n    json: {\n      batch_number: Math.floor(i / BATCH_SIZE) + 1,\n      total_batches: Math.ceil(items.length / BATCH_SIZE),\n      topic: topic,  // ← Include topic in each batch\n      items: items.slice(i, i + BATCH_SIZE).map(item => item.json),\n      is_last_batch: i + BATCH_SIZE >= items.length\n    }\n  });\n}\n\nreturn batches;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        16
+      ],
+      "id": "d3313c7f-a31c-4030-bf40-7d0fc5eabe8d",
+      "name": "Create Batches"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -224,
+        16
+      ],
+      "id": "64f89b8b-d977-4c21-9ae1-3e4d20e70333",
+      "name": "Loop Over Batches"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract current batch and format for LLM\nconst currentBatch = $input.first().json;\n\n// Format each item for the LLM prompt\nconst formattedItems = currentBatch.items.map(item => ({\n  item_id: item.item_id,\n  title: item.title,\n  url: item.url,\n  content: item.raw_content\n}));\n\nreturn [{\n  json: {\n    topic: currentBatch.topic,  // ← Topic comes from Create Batches\n    batch_info: {\n      batch_number: currentBatch.batch_number,\n      total_batches: currentBatch.total_batches,\n      is_last_batch: currentBatch.is_last_batch\n    },\n    items: formattedItems\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -64
+      ],
+      "id": "7f056622-6e28-4e03-9aa9-a50927d3b9fc",
+      "name": "Prepare Batch for LLM"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5f5c0ea9-b516-44ec-a71d-35e7e52bfdae",
+              "leftValue": "={{ $('Create Batches').item.json.is_last_batch }}",
+              "rightValue": "false",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1024,
+        -64
+      ],
+      "id": "195b7313-2b3b-42a1-ae33-36583a3c45dc",
+      "name": "Check if Last Batch"
+    },
+    {
+      "parameters": {
+        "amount": 20
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1248,
+        16
+      ],
+      "id": "3e7433f7-6da1-465f-b686-534b29bf8af9",
+      "name": "Wait",
+      "webhookId": "74859ac1-9d1a-4216-9572-7231a0e175aa"
+    },
+    {
+      "parameters": {
+        "jsCode": "const topic = $('Read System State').first().json.topic;\nconst periodData = $('Read System State').first().json;\n\n// Try to get counts from enrichment nodes\nlet itemsEnriched = 0;\nlet batchesProcessed = 0;\n\ntry {\n  // Reference nodes before the loop - just count all items\n  const selectItemsNode = $('Select Items to Enrich').all();\n  itemsEnriched = selectItemsNode.length;\n  \n  const createBatchesNode = $('Create Batches').all();\n  batchesProcessed = createBatchesNode.length;\n} catch (error) {\n  // Nodes didn't execute (FALSE branch), counts remain 0\n  itemsEnriched = 0;\n  batchesProcessed = 0;\n}\n\nreturn [{\n  json: {\n    topic: topic,\n    workflow_id: 2,\n    event: 'enrichment_complete',\n    status: 'success',\n    details: {\n      period_start: periodData.period_start,\n      period_end: periodData.period_end,\n      items_enriched: itemsEnriched,\n      batches_processed: batchesProcessed\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        208
+      ],
+      "id": "5c0cc233-614c-4ad0-9140-12093a33890f",
+      "name": "Create Log"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (topic, workflow_id, event, status, details)\nVALUES ($1, $2, $3, $4, $5)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [   $json.topic,   $json.workflow_id,   $json.event,   $json.status,   JSON.stringify($json.details) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1472,
+        208
+      ],
+      "id": "1993d203-02fd-4418-a25b-02552349137e",
+      "name": "Store Log",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1344,
+        16
+      ],
+      "id": "58565431-d44c-4bea-85fa-fb4b1443ccb2",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  value->>'current_topic' as topic,\n  value->>'period_start' as period_start,\n  value->>'period_end' as period_end\nFROM system_state\nWHERE key = 'current_cycle';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1120,
+        112
+      ],
+      "id": "e2a76dd1-472b-4b71-966b-0d4da1c4e456",
+      "name": "Read System State",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "iVL1Ij7wEHBuqNma",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/iVL1Ij7wEHBuqNma",
+          "cachedResultName": "03 – Digest Generation"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1696,
+        208
+      ],
+      "id": "2211434a-ff0f-491e-880f-ab777bbe826f",
+      "name": "Call '03 – Digest Generation'"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "90cb4135-be22-423d-83b3-c466278e4ae3",
+              "leftValue": "={{ Object.keys($input.first().json).length > 1 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -672,
+        112
+      ],
+      "id": "3248f534-9479-4d50-b4ed-d37d27dbe527",
+      "name": "Check if Items Exist"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Select Items to Enrich": {
+      "main": [
+        [
+          {
+            "node": "Check if Items Exist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model1": {
+      "main": [
+        [
+          {
+            "node": "Parse Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Output": {
+      "main": [
+        [
+          {
+            "node": "Populate items_enriched Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Batches": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Batches": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Prepare Batch for LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Batch for LLM": {
+      "main": [
+        [
+          {
+            "node": "Message a model1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Populate items_enriched Table": {
+      "main": [
+        [
+          {
+            "node": "Check if Last Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Last Batch": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Log": {
+      "main": [
+        [
+          {
+            "node": "Store Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Read System State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Read System State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Log": {
+      "main": [
+        [
+          {
+            "node": "Call '03 – Digest Generation'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read System State": {
+      "main": [
+        [
+          {
+            "node": "Select Items to Enrich",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Items Exist": {
+      "main": [
+        [
+          {
+            "node": "Create Batches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "TdW6eoOMApL7vEoL",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "ca0fb11a-ebd5-447e-aafd-293ba72b099c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cfe06626ec763e2df5f517d1ba577eaa29b09414c32e98b1ca767e9d11ce0db8"
+  },
+  "id": "J7d1X1UkDqlUtcJm",
+  "tags": []
+}

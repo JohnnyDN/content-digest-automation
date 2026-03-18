@@ -1,0 +1,19 @@
+# Secrets
+infra/.env
+
+# Backups (auto-generated)
+backups/
+
+# Node modules (for the renderer, when you add it)
+renderer/node_modules/
+renderer/output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Secret placeholders
+scripts/secrets.conf

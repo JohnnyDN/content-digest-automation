@@ -1,0 +1,373 @@
+{
+  "name": "01 - Feed Collection",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -656,
+        -400
+      ],
+      "id": "1109ff29-7d37-41b9-880c-573266caa509",
+      "name": "When clicking ‘Execute workflow’",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  id,\n  name,\n  url,\n  topic\nFROM sources\nWHERE is_active = TRUE;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -208,
+        -464
+      ],
+      "id": "6b5c484a-6b05-4bfa-bf2c-8322893375a5",
+      "name": "Select Active Sources",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO items (source_id, title, url, published_at, raw_content)\nVALUES ($1, $2, $3, $4, $5)\nON CONFLICT (url) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{ [$json.sourceid, $json.title, $json.url, $json.publishedat, $json.raw_content] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        688,
+        -400
+      ],
+      "id": "8bcf4ab0-58ac-4157-8848-89a71017060a",
+      "name": "Populate Items Table",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        16,
+        -464
+      ],
+      "id": "ba97fe67-5dc0-4808-bcfb-f8d24e6f81b0",
+      "name": "Loop Over Items",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        -464
+      ],
+      "id": "e4b5ce72-9fe6-4f77-97fe-12ff1ca68da8",
+      "name": "RSS Read"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// GET PERIOD FROM SYSTEM STATE\n// ============================================\n\n// Get period from system_state (read by earlier node)\nconst periodData = $('Read System State').first().json;\nconst periodStart = periodData.period_start; // e.g., \"2026-02-26\"\nconst periodEnd = periodData.period_end;     // e.g., \"2026-02-28\"\n\n// Convert to timestamps for filtering\nconst startOfWindowMs = new Date(periodStart + 'T00:00:00').getTime();\nconst endOfWindowMs = new Date(periodEnd + 'T23:59:59').getTime();\n\n// ============================================\n// GET SOURCE ID FROM PREVIOUS NODE\n// ============================================\n\n// Get the current row from the \"Select Active Sources\" node\nconst sourceRow = $('Select Active Sources').all()[$runIndex];\n\n// Extract the source ID from that row (or use 0 if not found)\nconst sourceId = sourceRow ? sourceRow.json.id : 0;\n\n// ============================================\n// PROCESS RSS ITEMS\n// ============================================\n\nconst items = $input.all()  // Get all input items from the RSS node\n  \n  // Step 1: Extract just the JSON data from each item\n  .map(item => item.json)\n  \n  // Step 2: Filter - keep only items from the period (excluding today)\n  .filter(item => {\n    const iso = item.isoDate;  // Get the publish date\n    if (!iso) return false;     // Skip if no date found\n    \n    const itemTime = new Date(iso).getTime();  // Convert to timestamp\n    \n    // Keep item if it's within the period window\n    return itemTime >= startOfWindowMs && itemTime <= endOfWindowMs;\n  })\n  \n  // Step 3: Limit to the 20 most recent items\n  .slice(0, 20)\n  \n  // Step 4: Transform into the format needed for database insert\n  .map(item => ({\n    json: {\n      sourceid: sourceId,           // Add the source ID from Postgres\n      title: item.title,             // RSS article title\n      url: item.link,                // RSS article URL\n      raw_content: item.content || item.contentSnippet || '',  // Full content (with HTML if available)\n      publishedat: item.isoDate      // Publication date in ISO format\n        ? new Date(item.isoDate).toISOString() \n        : new Date().toISOString()   // Fallback to current time if date missing\n    }\n  }));\n\n// ============================================\n// RETURN THE PROCESSED ITEMS\n// ============================================\n\nreturn items;  // Send to the next node in the workflow"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -464
+      ],
+      "id": "f503e400-8a49-429d-99a8-0d084dd9f8e3",
+      "name": "3-Day Filter",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get period from system_state\nconst periodData = $('Read System State').first().json;\n\n// Get count from SQL node\nconst itemsInserted = $('Count Inserted Items').first().json.count;\n\nreturn [{\n  json: {\n    topic: periodData.topic,\n    workflow_id: 1,\n    event: 'ingest_complete',\n    status: 'success',\n    details: {\n      period_start: periodData.period_start,\n      period_end: periodData.period_end,\n      items_inserted: itemsInserted\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -656
+      ],
+      "id": "2c957f61-64ed-422e-8af1-0d0c258613a4",
+      "name": "Create Log"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (topic, workflow_id, event, status, details)\nVALUES ($1, $2, $3, $4, $5)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [   $json.topic,   $json.workflow_id,   $json.event,   $json.status,   JSON.stringify($json.details) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        688,
+        -656
+      ],
+      "id": "55615e0a-36bf-4f3e-9058-ee82a3940872",
+      "name": "Store Log",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -656,
+        -592
+      ],
+      "id": "bb1281c8-e3f2-43a2-8370-52eb9e6d2dfa",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  value->>'current_topic' as topic,\n  value->>'period_start' as period_start,\n  value->>'period_end' as period_end\nFROM system_state\nWHERE key = 'current_cycle';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -432,
+        -464
+      ],
+      "id": "aa2d0fcb-e425-4482-b92f-6183bb33c173",
+      "name": "Read System State",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "J7d1X1UkDqlUtcJm",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/J7d1X1UkDqlUtcJm",
+          "cachedResultName": "02 – Enrichments"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        912,
+        -656
+      ],
+      "id": "3cfb5703-2442-4ed9-b691-8e95ef5d57d4",
+      "name": "Call '02 – Enrichments'"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*) as count\n   FROM items\n   WHERE created_at > NOW() - INTERVAL '2 minutes';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        -656
+      ],
+      "id": "d91628c3-3c70-4d17-9623-3008469b5362",
+      "name": "Count Inserted Items",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Read System State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Active Sources": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Populate Items Table": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Count Inserted Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RSS Read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS Read": {
+      "main": [
+        [
+          {
+            "node": "3-Day Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3-Day Filter": {
+      "main": [
+        [
+          {
+            "node": "Populate Items Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Log": {
+      "main": [
+        [
+          {
+            "node": "Store Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Log": {
+      "main": [
+        [
+          {
+            "node": "Call '02 – Enrichments'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Read System State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read System State": {
+      "main": [
+        [
+          {
+            "node": "Select Active Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Inserted Items": {
+      "main": [
+        [
+          {
+            "node": "Create Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "TdW6eoOMApL7vEoL",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "80e8191f-35de-4079-86dc-3565f087431c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cfe06626ec763e2df5f517d1ba577eaa29b09414c32e98b1ca767e9d11ce0db8"
+  },
+  "id": "Mm0WgbN9gowoFBh6",
+  "tags": []
+}

@@ -1,0 +1,289 @@
+{
+  "name": "00 - Cycle Manager",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        32
+      ],
+      "id": "622c2dc4-6b09-4cb0-82b7-6f8fb2157218",
+      "name": "When clicking ‘Execute workflow’",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// CALCULATE CYCLE TOPIC\n// ============================================\n\nconst topics = ['AI', 'Finance', 'Music', 'Science'];\nconst cycleDay = Math.floor(Date.now() / (3 * 24 * 60 * 60 * 1000));\nconst cycleIndex = cycleDay % topics.length;\nconst currentTopic = topics[cycleIndex];\n\n// ============================================\n// CALCULATE 3-DAY PERIOD\n// ============================================\n\nconst now = new Date();\n\n// Period Start: 3 days ago at midnight\nconst periodStart = new Date();\nperiodStart.setDate(now.getDate() - 3);\nperiodStart.setHours(0, 0, 0, 0);\n\n// Period End: Yesterday at midnight\nconst periodEnd = new Date();\nperiodEnd.setDate(now.getDate() - 1);\nperiodEnd.setHours(0, 0, 0, 0);\n\n// Helper function for local date formatting\nfunction formatLocalDate(date) {\n  const year = date.getFullYear();\n  const month = String(date.getMonth() + 1).padStart(2, '0');\n  const day = String(date.getDate()).padStart(2, '0');\n  return `${year}-${month}-${day}`;\n}\n\n// ============================================\n// RETURN COMPLETE STATE\n// ============================================\n\nreturn [{\n  json: {\n    current_topic: currentTopic,\n    cycle_index: cycleIndex,\n    period_start: formatLocalDate(periodStart),\n    period_end: formatLocalDate(periodEnd),\n    calculated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -64
+      ],
+      "id": "3981df31-d7f3-4d6a-9caf-7d11eaee4e2f",
+      "name": "Set 3 days Cycle Topic"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE sources \nSET is_active = (topic = $1)\nRETURNING $1 as activated_topic, \n          (SELECT COUNT(*) FROM sources WHERE is_active = true) as active_count;",
+        "options": {
+          "queryReplacement": "={{ [$('Set 3 days Cycle Topic').first().json.current_topic] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        672,
+        -64
+      ],
+      "id": "5de29bb7-3c13-401d-8bb5-9c0fbef59bdd",
+      "name": "Update sources Table",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get data from previous nodes\nconst topic = $('Set 3 days Cycle Topic').first().json.current_topic;\nconst sourcesData = $input.first().json;\n\n// Calculate current cycle number for reference\nconst now = new Date();\nconst cycleDay = Math.floor(now.getTime() / (3 * 24 * 60 * 60 * 1000)) % 4;\n\nreturn [{\n  json: {\n    topic: topic,\n    workflow_id: 0,\n    event: 'cycle_start',\n    status: 'success',\n    details: {\n      activated_topic: sourcesData.activated_topic,\n      active_sources_count: sourcesData.active_count,\n      cycle_index: cycleDay,\n      timestamp: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -64
+      ],
+      "id": "b6917d4a-0a8c-4631-b17c-bd4cfd401ec8",
+      "name": "Create Log"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO logs (topic, workflow_id, event, status, details)\nVALUES ($1, $2, $3, $4, $5)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [   $json.topic,   $json.workflow_id,   $json.event,   $json.status,   JSON.stringify($json.details) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1120,
+        -64
+      ],
+      "id": "c6fe5b2d-b938-439c-b61d-18e808ffe02d",
+      "name": "Store Log",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 */3 * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        -160
+      ],
+      "id": "c9313af9-239c-4b7f-9339-1d07e216e53e",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "CRONITOR_CYCLE_MANAGER_URL",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1344,
+        -64
+      ],
+      "id": "39f96bdd-b80d-4037-b6a3-d5bcb247923b",
+      "name": "Ping Cronitor"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO system_state (key, value)\nVALUES ('current_cycle', $1::jsonb)\nON CONFLICT (key) \nDO UPDATE SET value = $1::jsonb, updated_at = NOW()\nRETURNING *;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        -64
+      ],
+      "id": "6e6ea89e-fbcd-4d69-b313-83c94282d8f1",
+      "name": "Store System State",
+      "credentials": {
+        "postgres": {
+          "id": "IiCDFb1ZMiKbCX8l",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Mm0WgbN9gowoFBh6",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/Mm0WgbN9gowoFBh6",
+          "cachedResultName": "01 - Feed Collection"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1552,
+        -64
+      ],
+      "id": "6bf7c2a1-c273-47fa-84c7-1c982a7d3e30",
+      "name": "Call '01 - Feed Collection'"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Set 3 days Cycle Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set 3 days Cycle Topic": {
+      "main": [
+        [
+          {
+            "node": "Store System State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update sources Table": {
+      "main": [
+        [
+          {
+            "node": "Create Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Log": {
+      "main": [
+        [
+          {
+            "node": "Store Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set 3 days Cycle Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Log": {
+      "main": [
+        [
+          {
+            "node": "Ping Cronitor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Cronitor": {
+      "main": [
+        [
+          {
+            "node": "Call '01 - Feed Collection'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store System State": {
+      "main": [
+        [
+          {
+            "node": "Update sources Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "TdW6eoOMApL7vEoL",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "64dc6c04-0394-481a-ab92-ebff78bc71bf",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cfe06626ec763e2df5f517d1ba577eaa29b09414c32e98b1ca767e9d11ce0db8"
+  },
+  "id": "6kbkQyAjU8kTapVf",
+  "tags": []
+}
